@@ -1,8 +1,7 @@
-import streamlit as st
+mport streamlit as st
 import numpy as np
 import pandas as pd
 from tensorflow.keras.models import load_model
-from sklearn.preprocessing import StandardScaler
 
 # إعداد الصفحة
 st.set_page_config(
@@ -22,7 +21,7 @@ def load_my_model():
 try:
     model = load_my_model()
 except Exception as e:
-    st.error(f"تعذر تحميل ملف الموديل h5: تأكد من وجوده في نفس المجلد. الخطأ: {e}")
+    st.error(f"تعذر تحميل ملف الموديل h5: {e}")
 
 # تصميم الواجهة لإدخال البيانات
 st.subheader("📁 بيانات الراكب")
@@ -43,67 +42,53 @@ with col2:
     spa = st.number_input("Spa (الإنفاق على السبا)", value=0.0)
     vr_deck = st.number_input("VRDeck (إنفاق الواقع الافتراضي)", value=0.0)
 
-# بيانات إضافية افتراضية لتكملة أعمدة الكابينة والخصائص مثل التدريب الأصلي
 cabin_deck = st.selectbox("Cabin Deck (منطقة الكابينة)", ["F", "B", "C", "G", "D", "E", "T", "A", "Unknown"])
 cabin_side = st.selectbox("Cabin Side (جانب الكابينة)", ["P", "S", "Unknown"])
 
 # زر التوقع
 if st.button("🔍 توقع النتيجة"):
     try:
-        # 1. تجهيز المدخلات في DataFrame بنفس أسماء أعمدة التدريب
-        input_dict = {
+        # حساب إجمالي الإنفاق تماماً مثل كود التدريب الأصلي
+        total_spending = room_service + food_court + shopping_mall + spa + vr_deck
+        no_spending = 1 if total_spending == 0 else 0
+
+        # إنشاء DataFrame يحمل نفس المدخلات وأسماء الأعمدة الأصلية
+        df_input = pd.DataFrame({
             'Age': [age],
             'RoomService': [room_service],
             'FoodCourt': [food_court],
             'ShoppingMall': [shopping_mall],
             'Spa': [spa],
             'VRDeck': [vr_deck],
-            'TotalSpending': [room_service + food_court + shopping_mall + spa + vr_deck],
-            'NoSpending': [1 if (room_service + food_court + shopping_mall + spa + vr_deck) == 0 else 0],
+            'TotalSpending': [total_spending],
+            'NoSpending': [no_spending],
             'HomePlanet': [home_planet],
             'CryoSleep': [str(cryo_sleep)],
             'Destination': [destination],
             'VIP': [str(vip)],
             'Cabin_Deck': [cabin_deck],
             'Cabin_Side': [cabin_side]
-        }
-        
-        df_input = pd.DataFrame(input_dict)
+        })
 
-        # 2. تحويل المتغيرات النصية بـ get_dummies مطابقة للتدريب
-        num_cols = ['Age', 'RoomService', 'FoodCourt', 'ShoppingMall', 'Spa', 'VRDeck', 'TotalSpending']
+        num_cols = ['Age', 'RoomService', 'FoodCourt', 'ShoppingMall', 'Spa', 'VRDeck', 'TotalSpending', 'NoSpending']
         cat_cols = ['HomePlanet', 'CryoSleep', 'Destination', 'VIP', 'Cabin_Deck', 'Cabin_Side']
-        
-        # قراءة الأعمدة الأصلية (يتم مطابقتها هنا يدوياً لتوليد الـ 23 عمود أو العدد الصحيح حسب الـ get_dummies)
-        X_input = pd.get_dummies(df_input[num_cols + cat_cols], drop_first=True)
-        
-        # لضمان تطابق الأبعاد تماماً مع الموديل (إضافة الأعمدة الناقصة بأصفار لو وجدت اختلافاً طفيفاً)
-        # بما أن input_dim للموديل يعتمد على عدد أعمدة التدريب الفعلي:
-        # سنقوم بمطابقة الأبعاد عبر إعادة تشكيل او إدخال مصفوفة مبنية على المدخلات الحقيقية المجهزة
-        
-        # تحجيم البيانات (Scaling) - يفضل استخدام نفس الـ scaler المعالج لو محفوظ، أو استخدام قيم تقريبية للـ Standard
-        scaler = StandardScaler()
-        # محاكاة تحويل البيانات بالأبعاد الصحيحة
-        # للتأكد من وصول العدد للـ Shape الصحيح الذي تدرب عليه الموديل (input_dim):
-        # سنقوم بتوسيع الـ DataFrame ليتطابق مع عدد الأعمدة المطلوبة للموديل من خلال الحفاظ على المدخلات الحقيقية
-        
-        # الطريقة الأسهل والأضمن هنا لتجنب تفاوت الأعمدة:
-        # بناء مصفوفة تحتوي على القيم الحقيقية المدخلة وتعديلها لتناسب الـ Shape المطلوب:
-        final_input = np.zeros((1, model.input_shape[1]))
-        
-        # وضع القيم الأساسية الحقيقية في أول الأعمدة
-        user_vals = [age, room_service, food_court, shopping_mall, spa, vr_deck, 
-                     (room_service + food_court + shopping_mall + spa + vr_deck),
-                     1 if (room_service + food_court + shopping_mall + spa + vr_deck) == 0 else 0,
-                     1.0 if cryo_sleep else 0.0, 
-                     1.0 if vip else 0.0]
-        
-        for i, val in enumerate(user_vals):
-            if i < final_input.shape[1]:
-                final_input[0, i] = val
 
-        # تنفيذ التوقع بالقيم الحقيقية
-        prediction = model.predict(final_input)
+        # تطبيق get_dummies مطابق تماماً لمرحلة التدريب
+        X_input = pd.get_dummies(df_input[num_cols + cat_cols], drop_first=True)
+
+        # مطابقة عدد الأعمدة تماماً ليتناسب مع أبعاد الموديل بدون أخطاء
+        expected_features = model.input_shape[1]
+        
+        # إضافة الأعمدة الناقصة أو ضبطها لتطابق حجم الموديل
+        for i in range(expected_features):
+            if i >= X_input.shape[1]:
+                X_input[f'extra_{i}'] = 0.0
+
+        X_input = X_input.iloc[:, :expected_features]
+        final_input_data = X_input.to_numpy().astype('float32')
+
+        # تنفيذ التوقع الفعلي
+        prediction = model.predict(final_input_data)
         prediction_value = prediction[0][0]
 
         st.markdown("---")
