@@ -8,7 +8,19 @@
     in the retrieved concepts — clearly frame it as an illustrative example
     built from the course concepts, not a quoted example from the book.
 
+def is_example_request(question):
+    text = " ".join(question.strip().lower().split())
+    normalized = (
+        text.replace("؟", "").replace("?", "").replace("!", "").strip()
+    )
 
+    example_markers = [
+        "امثله", "أمثلة", "مثال", "امثلة",
+        "سيناريو", "سيناريوهات",
+        "اسئله واجوبه", "أسئلة وأجوبة", "سؤال وجواب",
+    ]
+
+    return any(marker in normalized for marker in example_markers)
 
 .....
 
