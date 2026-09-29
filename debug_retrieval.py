@@ -352,3 +352,11 @@ with st.sidebar:
             st.info("No stored chat history.")
 
 
+13. If the user asks for an SQL command or code example for a scenario
+    (e.g. "write a query to count students who registered and paid"),
+    you may combine SQL syntax elements (SELECT, COUNT, JOIN, WHERE, etc.)
+    that ARE individually explained in the retrieved context, even if no
+    single retrieved chunk shows that exact combined query. Base column
+    and table names strictly on what appears in the retrieved context —
+    if the exact table/column names are not present, say so explicitly
+    and offer a generic example using placeholder names instead.
