@@ -1,3 +1,61 @@
+        elif is_example_request(question):          # ← الكتلة الجديدة
+            documents = get_document_overview_samples(max_chunks=12)
+            context = build_context(documents)
+            sources = get_sources(documents)
+
+            placeholder = st.empty()
+            chunks = []
+
+            for chunk in stream_model(
+                question=question,
+                context=context,
+                history=history_for_rag,
+            ):
+                chunks.append(chunk)
+                placeholder.markdown("".join(chunks) + "▌")
+
+            answer = sanitize_output("".join(chunks))
+            placeholder.markdown(answer)
+
+        else:
+            documents = retrieve_documents(
+                question=question,
+                history=history_for_rag,
+            )
+
+            context = build_context(documents)
+            sources = get_sources(documents)
+            retrieval_info = get_retrieval_info(documents)
+
+            if not context.strip():
+                answer = (
+                    "The current knowledge base does not contain enough relevant "
+                    "information to answer this question."
+                )
+                st.markdown(answer)
+            else:
+                placeholder = st.empty()
+                chunks = []
+
+                for chunk in stream_model(
+                    question=question,
+                    context=context,
+                    history=history_for_rag,
+                ):
+                    chunks.append(chunk)
+                    placeholder.markdown("".join(chunks) + "▌")
+
+                answer = sanitize_output("".join(chunks))
+                placeholder.markdown(answer)
+
+ أااااااااااا
+
+
+
+
+
+
+
 13. If the user asks for an example, scenario, or Q&A illustrating a concept
     (e.g. "give me an example about X", "examples on the relationship
     between students and course registration"), you may construct a
