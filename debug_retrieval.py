@@ -1,37 +1,354 @@
-1) صياغات السؤال (query variants)
-============================================================
- - 'الفرق بين primary key و forign key'
- - 'الفرق بين primary key و forign key primary key المفتاح الأساسي key primary key foreign key مفتاح foreign key المفتاح الأجنبي key primary key foreign key مفتاح'
- - 'الفرق بين primary key forign key'
+import uuid
 
-============================================================
-2) نتايج hybrid_search للسؤال الأصلي
-============================================================
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-Loading weights: 100%|████████████████| 391/391 [00:02<00:00, 166.49it/s]
-عدد النتايج: 16
- hybrid_score=0.0164 | page=229 | 'key?  \n∙ Candidate keys are chosen randomly  \n∙ Primary key is the selected cand'
- hybrid_score=0.0161 | page=207 | '58. What is the difference between a candidate key and a primary \nkey?  \n∙ Candi'
- hybrid_score=0.0154 | page=229 | '∙ To uniquely identify tuples  \n∙ To store multiple values  \n∙ To reference othe'
- hybrid_score=0.0149 | page=216 | 'primary key ∙ All attributes must be candidate keys  \n∙ All attributes must be f'
- hybrid_score=0.0146 | page=14 | '3Representingrelationships between tables  \n• A foreign key creates a relationsh'
+import streamlit as st
 
-============================================================
-3) بعد الـ reranking
-============================================================
-Loading weights: 100%|███████████████| 201/201 [00:00<00:00, 1090.73it/s]
- rerank_score=0.9413 | page=207 | '58. What is the difference between a candidate key and a primary \nkey?  \n∙ Candi'
- rerank_score=0.8059 | page=229 | 'key?  \n∙ Candidate keys are chosen randomly  \n∙ Primary key is the selected cand'
- rerank_score=0.5635 | page=229 | '∙ To uniquely identify tuples  \n∙ To store multiple values  \n∙ To reference othe'
- rerank_score=0.1161 | page=216 | 'primary key ∙ All attributes must be candidate keys  \n∙ All attributes must be f'
- rerank_score=0.0766 | page=14 | '3Representingrelationships between tables  \n• A foreign key creates a relationsh'
+from config import (
+    ADMIN_PASSWORD,
+    APP_DESCRIPTION,
+    APP_NAME,
+    MAX_HISTORY_MESSAGES,
+)
+from database import get_chat_history, save_chat
+from export_chat import chat_to_pdf, chat_to_text
+from feedback import record_feedback
+from generator import stream_model
+from output_guard import sanitize_output
+from rate_limiter import allow_request
+from retriever import (
+    build_context,
+    get_document_overview_samples,
+    get_retrieval_info,
+    get_sources,
+    retrieve_documents,
+)
+from security import security_check
 
-============================================================
-4) النتيجة النهائية من retrieve_documents (الفعلية)
-============================================================
-عدد النتايج النهائية: 4
- rerank_score=0.9413 | '58. What is the difference between a candidate key and a primary \nkey?  \n∙ Candidate keys are chosen'
- rerank_score=0.8059 | 'key?  \n∙ Candidate keys are chosen randomly  \n∙ Primary key is the selected candidate key  \n∙ Candid'
- rerank_score=0.5635 | '∙ To uniquely identify tuples  \n∙ To store multiple values  \n∙ To reference other tables  \nAnswer: T'
- rerank_score=0.1161 | 'primary key ∙ All attributes must be candidate keys  \n∙ All attributes must be foreign keys  \n   Ans'
-(venv) PS E:\نقل ملفات من السى C\Downloads\Reusable_RAG_Engine_Production_Updated> 
+
+st.set_page_config(
+    page_title=APP_NAME,
+    page_icon="🤖",
+    layout="centered",
+)
+
+st.title(f"🤖 {APP_NAME}")
+st.caption(APP_DESCRIPTION)
+
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
+
+def is_greeting(question):
+    """
+    أسئلة الترحيب/التحية البسيطة وأسئله الشكر والمدح جاوب عليهم بطريقه لطيفه. لا تدخل هنا أي أسئلة عن الهوية
+    أو المطور أو محتوى النظام، عشان تلك الأسئلة تمر على retrieve_documents
+    العادي وترجع 'لا يوجد سياق كافٍ' تلقائياً لو مفيش معلومة عنها في الـ PDF.
+    """
+
+    #"""
+   #", لو سألك المستخدم" عن ايه المحتوى" أو" الماده عن ايه" أو "ايه الاسئله اللى ممكن أسأل فيها" اجب "matreial : SQL , No SQL, Indexing ,Normalization,Transaction,Quession & Answer
+
+    #"""
+
+    text = " ".join(question.strip().lower().split())
+    normalized = (
+        text.replace("؟", "")
+        .replace("?", "")
+        .replace("!", "")
+        .strip()
+    )
+
+    greetings = {
+        "عامل ايه", "عامل إيه", "عامل اية","ايه الاخبار","ايه الدنيا",
+        "عامل ازاي", "عامل إزاي","ازيك يا صديق", "ازيك يا صديقى",
+        "اهلا", "أهلا", "اهلا بيك", "أهلا بيك",
+        "السلام عليكم","سلام عليكم","سلام عليك",
+        "صباح الخير", "مساء الخير","good morning"
+        "ازيك", "إزيك","how are you","How are you",
+        "hi", "hello", "hey","welcom","Welcom","Hi","hallo",
+        "good","nice","very good","thanks","thank you","عمل رائع","شكرا","بالتوفيق","ممتاز",
+    }
+
+    return normalized in greetings
+
+
+
+def is_content_scope_question(question):
+    text = " ".join(question.strip().lower().split())
+    normalized = (
+        text.replace("؟", "")
+        .replace("?", "")
+        .replace("!", "")
+        .strip()
+    )
+
+    scope_keywords = [
+        "عن ايه المحتوى", "عن إيه", "المحتوى عن اية",
+        "المحتوى عن", "المادة عن", "الماده عن",
+        "بتفهم في ايه", "بتفهم في إيه",
+        "الاسئله اللي", "الأسئلة التي", "اسئله ممكن",
+        "المواضيع اللي", "المواضيع التي",
+        "ايه المحتوى", "إيه المحتوى",
+        "what topics", "what can i ask", "what is this about","topics","Topics",
+    ]
+
+    return any(keyword in normalized for keyword in scope_keywords)
+
+
+CONTENT_SCOPE_ANSWER = (
+    "material : SQL , NoSQL , Indexing , Normalization , "
+    "Transaction ,Relation ,SCHEMA, Question & Answer",
+    "Primary Key ,Forign Key, Erd",
+)
+
+
+
+def is_full_summary_question(question):
+    text = " ".join(question.strip().lower().split())
+    normalized = (
+        text.replace("؟", "").replace("?", "").replace("!", "").strip()
+    )
+
+    summary_keywords = [
+        "ملخص", " لخص الماده باختصار", "تلخيص","هات ملخص الماده",
+        "ملخص للماده","ملخص المنهج","ملخص الكورس","summary course","summary of the course",
+        "summarize material","give me a summary","overview of the material","overview material",
+
+
+
+    ]
+
+
+def display_sources(sources, retrieval_info=None):
+    if not sources and not retrieval_info:
+        return
+
+    with st.expander("📚 Sources & retrieval details"):
+        if sources:
+            st.markdown("**Sources**")
+            for source in sources:
+                st.write(f"- {source}")
+
+        if retrieval_info:
+            variants = retrieval_info.get("query_variants", [])
+            if variants:
+                st.markdown("**Search variants used**")
+                for variant in variants:
+                    st.code(variant, language=None)
+
+
+for index, message in enumerate(st.session_state.messages):
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+        if message["role"] == "assistant":
+            display_sources(
+                message.get("sources", []),
+                message.get("retrieval_info"),
+            )
+
+            if message.get("question"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    if st.button("👍", key=f"up_{index}"):
+                        record_feedback(
+                            question=message["question"],
+                            answer=message["content"],
+                            feedback="up",
+                            sources=message.get("sources", []),
+                            session_id=st.session_state.session_id,
+                        )
+                        st.success("Thanks for the feedback.")
+
+                with col2:
+                    if st.button("👎", key=f"down_{index}"):
+                        record_feedback(
+                            question=message["question"],
+                            answer=message["content"],
+                            feedback="down",
+                            sources=message.get("sources", []),
+                            session_id=st.session_state.session_id,
+                        )
+                        st.info("Feedback recorded.")
+
+
+question = st.chat_input("Ask a question about the knowledge base...")
+
+if question:
+    client_id = st.session_state.session_id
+
+    if not allow_request(client_id):
+        st.error(
+            "Too many requests. Please wait a little before sending another question."
+        )
+        st.stop()
+
+    allowed, security_message = security_check(question)
+
+    if not allowed:
+        st.error(security_message)
+        st.stop()
+
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": question,
+        }
+    )
+
+    history_for_rag = st.session_state.messages[:-1][-MAX_HISTORY_MESSAGES:]
+
+    with st.chat_message("user"):
+        st.markdown(question)
+
+##
+
+
+    with st.chat_message("assistant"):
+        sources = []
+        retrieval_info = {}
+
+        if is_greeting(question):
+            placeholder = st.empty()
+            chunks = []
+
+            for chunk in stream_model(
+                question=question,
+                context="",
+                history=history_for_rag,
+            ):
+                chunks.append(chunk)
+                placeholder.markdown("".join(chunks) + "▌")
+
+            answer = sanitize_output("".join(chunks))
+            placeholder.markdown(answer)
+
+        elif is_content_scope_question(question):
+            answer = CONTENT_SCOPE_ANSWER
+            st.markdown(answer)
+
+        elif is_full_summary_question(question):
+            documents = get_document_overview_samples(max_chunks=20)
+            context = build_context(documents)
+            sources = get_sources(documents)
+
+            placeholder = st.empty()
+            chunks = []
+
+            for chunk in stream_model(
+                question=(
+                    "لخّص المحتوى العام للمادة الدراسية التالية في نقاط "
+                    "رئيسية واضحة، بناءً فقط على المقتطفات الموزعة أدناه "
+                    "التي تمثل عينة من الكتاب كامل."
+                ),
+                context=context,
+                history=history_for_rag,
+            ):
+                chunks.append(chunk)
+                placeholder.markdown("".join(chunks) + "▌")
+
+            answer = sanitize_output("".join(chunks))
+            placeholder.markdown(answer)
+
+        else:
+            documents = retrieve_documents(
+                question=question,
+                history=history_for_rag,
+            )
+
+            context = build_context(documents)
+            sources = get_sources(documents)
+            retrieval_info = get_retrieval_info(documents)
+
+            if not context.strip():
+                answer = (
+                    "The current knowledge base does not contain enough relevant "
+                    "information to answer this question."
+                )
+                st.markdown(answer)
+            else:
+                placeholder = st.empty()
+                chunks = []
+
+                for chunk in stream_model(
+                    question=question,
+                    context=context,
+                    history=history_for_rag,
+                ):
+                    chunks.append(chunk)
+                    placeholder.markdown("".join(chunks) + "▌")
+
+                answer = sanitize_output("".join(chunks))
+                placeholder.markdown(answer)
+
+        display_sources(sources, retrieval_info)
+
+
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": answer,
+            "sources": sources,
+            "retrieval_info": retrieval_info,
+            "question": question,
+        }
+    )
+
+    save_chat(
+        question=question,
+        answer=answer,
+        sources=sources,
+        session_id=st.session_state.session_id,
+    )
+
+
+with st.sidebar:
+    st.header("⚙️ Controls")
+
+    if st.button("🗑️ New conversation"):
+        st.session_state.messages = []
+        st.session_state.session_id = str(uuid.uuid4())
+        st.rerun()
+
+    st.download_button(
+        "📄 Export TXT",
+        data=chat_to_text(st.session_state.messages),
+        file_name="rag_chat.txt",
+        mime="text/plain",
+    )
+
+    st.download_button(
+        "📕 Export PDF",
+        data=chat_to_pdf(st.session_state.messages),
+        file_name="rag_chat.pdf",
+        mime="application/pdf",
+    )
+
+    st.divider()
+    st.subheader("Admin")
+
+    admin_password = st.text_input(
+        "Admin password",
+        type="password",
+    )
+
+    if (
+        ADMIN_PASSWORD
+        and admin_password
+        and admin_password == ADMIN_PASSWORD
+    ):
+        st.success("Admin authenticated.")
+
+        history = get_chat_history(limit=100)
+
+        if history:
+            for item in history:
+                st.write(item)
+        else:
+            st.info("No stored chat history.")
+
+
