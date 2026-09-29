@@ -8,6 +8,98 @@
     in the retrieved concepts — clearly frame it as an illustrative example
     built from the course concepts, not a quoted example from the book.
 
+######################
+with st.chat_message("assistant"):
+        sources = []
+        retrieval_info = {}
+
+        if is_greeting(question):
+            placeholder = st.empty()
+            chunks = []
+
+            for chunk in stream_model(
+                question=question,
+                context="",
+                history=history_for_rag,
+            ):
+                chunks.append(chunk)
+                placeholder.markdown("".join(chunks) + "▌")
+
+            answer = sanitize_output("".join(chunks))
+            placeholder.markdown(answer)
+
+        elif is_content_scope_question(question):
+            answer = CONTENT_SCOPE_ANSWER
+            st.markdown(answer)
+
+        elif is_full_summary_question(question):
+
+            documents = get_document_overview_samples(max_chunks=20)
+            context = build_context(documents)
+            sources = get_sources(documents)
+
+            placeholder = st.empty()
+            chunks = []
+
+            for chunk in stream_model(
+                question=(
+                    "لخّص المحتوى العام للمادة الدراسية التالية في نقاط "
+                    "رئيسية واضحة، بناءً فقط على المقتطفات الموزعة أدناه "
+                    "التي تمثل عينة من الكتاب كامل."
+                ),
+                context=context,
+                history=history_for_rag,
+            ):
+                chunks.append(chunk)
+                placeholder.markdown("".join(chunks) + "▌")
+
+            answer = sanitize_output("".join(chunks))
+            placeholder.markdown(answer)
+
+        else:
+            documents = retrieve_documents(
+                question=question,
+                history=history_for_rag,
+            )
+
+            context = build_context(documents)
+            sources = get_sources(documents)
+            retrieval_info = get_retrieval_info(documents)
+
+            if not context.strip():
+                answer = (
+                    "The current knowledge base does not contain enough relevant "
+                    "information to answer this question."
+                )
+                st.markdown(answer)
+
+
+                
+            else:
+                placeholder = st.empty()
+                chunks = []
+
+                for chunk in stream_model(
+                    question=question,
+                    context=context,
+                    history=history_for_rag,
+                ):
+                    chunks.append(chunk)
+                    placeholder.markdown("".join(chunks) + "▌")
+
+                answer = sanitize_output("".join(chunks))
+                placeholder.markdown(answer)
+
+        display_sources(sources, retrieval_info)
+
+
+
+
+
+
+
+##########################
+
 def is_example_request(question):
     text = " ".join(question.strip().lower().split())
     normalized = (
