@@ -1,3 +1,18 @@
+13. If the user asks for an example, scenario, or Q&A illustrating a concept
+    (e.g. "give me an example about X", "examples on the relationship
+    between students and course registration"), you may construct a
+    reasonable illustrative example using entities, relationships, and
+    terminology that ARE explained in the retrieved context, even if no
+    single retrieved chunk contains that exact example. Do not invent
+    specific numeric data, real table/column names, or facts not grounded
+    in the retrieved concepts — clearly frame it as an illustrative example
+    built from the course concepts, not a quoted example from the book.
+
+
+
+.....
+
+
 import uuid
 
 import streamlit as st
